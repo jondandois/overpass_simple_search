@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaflet and Overpass Example</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body { margin: 0; }
+        #map { height: calc(100vh - 60px); top: 60px;} /* Adjusted map height to leave space for input */
+        #queryInput { position: absolute; background: white; padding: 5px; z-index: 1000; }
+        #myLocationBtn { position: absolute; top: 10px; right: 10px; z-index: 1000; }
+    </style>
+</head>
+<body>
+
+<div id="queryInput">
+    <label for="overpassQuery">Overpass Query:</label>
+    <select id="presetSelect">
+        <option value="amenity=public_bookcase">Public Bookcase</option>
+        <option value="leisure=playground">Playground</option>
+        <!-- Add more preset options as needed -->
+    </select>
+    <input type="text" id="overpassQuery" placeholder="Or enter custom query"/>
+    <button onclick="runOverpassQuery()">Run Query</button>
+</div>
+
+<div id="map"></div>
+
+<button id="myLocationBtn" onclick="getMyLocation()">My Location</button>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+
+<script>
+    // Initialize the map
+    var map = L.map('map').setView([39.3315083, -76.6254834], 13);
+
+    // Add OpenStreetMap as the base map
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Function to run Overpass query
+    function runOverpassQuery() {
+        var query = document.getElementById('overpassQuery').value;
+
+        // If a preset is selected, use its value
+        var presetSelect = document.getElementById('presetSelect');
+        var selectedPreset = presetSelect.options[presetSelect.selectedIndex].value;
+        if (selectedPreset && !query) {
+            query = selectedPreset;
+        }
+
+        var overpassQuery = `nwr[${query}]`;
+
+        // Replace [bbox] with the current map bounding box
+        var bbox = map.getBounds();
+        overpassQuery += `(
+            ${bbox.getSouthWest().lat},
+            ${bbox.getSouthWest().lng},
+            ${bbox.getNorthEast().lat},
+            ${bbox.getNorthEast().lng}
+        )`;
+
+        // Add the required preamble to the Overpass query
+        var fullOverpassQuery = `
+        [out:json][timeout:25];
+        ${overpassQuery};
+        out geom;`;
+
+        // Send the Overpass query as a POST request
+        axios.post('https://overpass-api.de/api/interpreter', fullOverpassQuery, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        })
+            .then(function (response) {
+                console.log(response.data);
+                if (response.data && response.data.elements) {
+                    handleOverpassData(response.data.elements);
+                }
+            })
+            .catch(function (error) {
+                console.error('Error fetching Overpass data:', error);
+            });
+    }
+
+    // Function to handle Overpass data and create markers or calculate average position
+    function handleOverpassData(elements) {
+        // Clear existing markers
+        map.eachLayer(function (layer) {
+            if (layer instanceof L.Marker) {
+                map.removeLayer(layer);
+            }
+        });
+
+        // Iterate over elements and create markers or calculate average position
+        elements.forEach(function (element) {
+            if (element.type === 'node' && element.lat && element.lon) {
+                // Create a marker
+                var marker = L.marker([element.lat, element.lon]).addTo(map);
+
+                // Create a popup with tags information
+                var popupContent = '<ul>';
+                for (var key in element.tags) {
+                    popupContent += '<li><strong>' + key + ':</strong> ' + element.tags[key] + '</li>';
+                }
+                popupContent += '</ul>';
+
+                marker.bindPopup(popupContent);
+            } else if (element.bounds) {
+                // Calculate average position from bounds
+                var avgLat = (element.bounds.minlat + element.bounds.maxlat) / 2;
+                var avgLon = (element.bounds.minlon + element.bounds.maxlon) / 2;
+
+                // Create a marker at the average position
+                var marker = L.marker([avgLat, avgLon]).addTo(map);
+
+                // Create a popup with tags information
+                var popupContent = '<ul>';
+                for (var key in element.tags) {
+                    popupContent += '<li><strong>' + key + ':</strong> ' + element.tags[key] + '</li>';
+                }
+                popupContent += '</ul>';
+
+                marker.bindPopup(popupContent);
+            }
+        });
+    }
+
+    // Function to get user's current location
+    function getMyLocation() {
+        if ('geolocation' in navigator) {
+            navigator.geolocation.getCurrentPosition(function (position) {
+                var myLat = position.coords.latitude;
+                var myLon = position.coords.longitude;
+
+                // Set map view to user's location
+                map.setView([myLat, myLon], 13);
+
+                // Add a marker for user's location
+                var myLocationMarker = L.marker([myLat, myLon], { icon: L.divIcon({ className: 'my-location-icon' }) }).addTo(map);
+
+                // Popup with user's location information
+                // var popupContent = 'Your Location:<br>Latitude: ' + myLat + '<br>Longitude: ' + myLon;
+                // myLocationMarker.bindPopup(popupContent).openPopup();
+            }, function (error) {
+                console.error('Error getting location:', error);
+            });
+        } else {
+            alert('Geolocation is not supported by your browser.');
+        }
+    }
+
+</script>
+
+</body>
+</html>
